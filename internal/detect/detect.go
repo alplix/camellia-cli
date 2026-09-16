@@ -67,4 +67,3 @@ func estimateFLOPS(ncpus int, model string) float64 {
 	}
 	return math.Round(float64(ncpus)*flopsPerCore/1e9) * 1e9
 }
-

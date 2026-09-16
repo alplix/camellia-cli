@@ -36,7 +36,7 @@ type Config struct {
 
 type StateAccessor interface {
 	GetResults() []ResultSnapshot
-	UpdateResult(name string, state int, fracDone float64, cpuTime float64)
+	UpdateResult(name string, state int, fracDone float64, cpuTime float64, exitStatus int)
 	SetSlotPath(name, slotPath string)
 	RemoveResult(name string)
 	GetTaskMode() int
@@ -101,6 +101,7 @@ const (
 	StateError    = 5
 
 	ExitOK            = 0
+	ExitComputeError  = 1
 	ExitNeedAbort     = 64
 	ExitMaxReject     = 191
 	ExitAborted       = 192
@@ -125,14 +126,14 @@ func NewEngine(state StateAccessor, cache CacheAccessor, projects ProjectAccesso
 		cfg.CheckpointSec = 600
 	}
 	return &Engine{
-		state:   state,
-		cache:   cache,
+		state:    state,
+		cache:    cache,
 		projects: projects,
-		dl:      dl,
-		ul:      ul,
-		stop:    make(chan struct{}),
-		running: make(map[string]*exec.Cmd),
-		cfg:     cfg,
+		dl:       dl,
+		ul:       ul,
+		stop:     make(chan struct{}),
+		running:  make(map[string]*exec.Cmd),
+		cfg:      cfg,
 	}
 }
 
@@ -143,34 +144,37 @@ func (e *Engine) Start() {
 
 func (e *Engine) Stop() {
 	e.mu.Lock()
+	if e.stopping {
+		e.mu.Unlock()
+		return
+	}
 	e.stopping = true
 	e.mu.Unlock()
+	close(e.stop)
 	log.Println("[Worker] Stopping, waiting for tasks...")
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	timeout := time.After(120 * time.Second)
 	for {
+		e.mu.RLock()
+		n := len(e.running)
+		e.mu.RUnlock()
+		if n == 0 {
+			log.Println("[Worker] All tasks finished.")
+			return
+		}
 		select {
 		case <-ticker.C:
-			e.mu.RLock()
-			n := len(e.running)
-			e.mu.RUnlock()
-			if n == 0 {
-				log.Println("[Worker] All tasks finished.")
-				return
-			}
 			log.Printf("[Worker] Waiting for %d tasks to finish...", n)
 		case <-timeout:
 			e.mu.Lock()
 			for name, cmd := range e.running {
-				cmd.Process.Kill()
+				terminateProcess(cmd)
 				log.Printf("[Worker] Force killed %s", name)
 			}
 			e.running = make(map[string]*exec.Cmd)
 			e.mu.Unlock()
 			log.Println("[Worker] Force stopped remaining tasks.")
-			return
-		case <-e.stop:
 			return
 		}
 	}
@@ -233,7 +237,7 @@ func (e *Engine) startTask(r ResultSnapshot) {
 		slot, err := e.cache.AllocSlot(r.GPU)
 		if err != nil {
 			log.Printf("[Worker] No slot for %s: %v", r.Name, err)
-			e.state.UpdateResult(r.Name, StateError, 0, 0)
+			e.state.UpdateResult(r.Name, StateError, 0, 0, 0)
 			return
 		}
 		r.Slot = slot
@@ -242,7 +246,7 @@ func (e *Engine) startTask(r ResultSnapshot) {
 
 	if err := os.MkdirAll(r.Slot, 0o755); err != nil {
 		log.Printf("[Worker] Cannot create slot %s: %v", r.Slot, err)
-		e.state.UpdateResult(r.Name, StateError, 0, 0)
+		e.state.UpdateResult(r.Name, StateError, 0, 0, 0)
 		return
 	}
 
@@ -251,28 +255,28 @@ func (e *Engine) startTask(r ResultSnapshot) {
 		log.Printf("[Worker] Found checkpoint for %s", r.Name)
 		progress := readProgress(r.Slot)
 		if progress > 0 {
-			e.state.UpdateResult(r.Name, StateDownload, progress, 0)
+			e.state.UpdateResult(r.Name, StateDownload, progress, 0, 0)
 			log.Printf("[Worker] Resuming %s from checkpoint (progress=%.2f)", r.Name, progress)
 		}
 	}
 
-	e.state.UpdateResult(r.Name, StateDownload, r.FracDone, 0)
+	e.state.UpdateResult(r.Name, StateDownload, r.FracDone, 0, 0)
 
 	if err := e.downloadFiles(r); err != nil {
 		log.Printf("[Worker] Download failed for %s: %v", r.Name, err)
-		e.state.UpdateResult(r.Name, StateError, 0, 0)
+		e.state.UpdateResult(r.Name, StateError, 0, 0, 0)
 		return
 	}
 
 	exePath := e.findExecutable(r)
 	if exePath == "" {
 		log.Printf("[Worker] No executable found for %s", r.Name)
-		e.state.UpdateResult(r.Name, StateError, 0, 0)
+		e.state.UpdateResult(r.Name, StateError, 0, 0, 0)
 		return
 	}
 
 	log.Printf("[Worker] Task %s ready, launching %s", r.Name, exePath)
-	e.state.UpdateResult(r.Name, StateCompute, r.FracDone, 0)
+	e.state.UpdateResult(r.Name, StateCompute, r.FracDone, 0, 0)
 	e.runApp(r, exePath)
 }
 
@@ -345,13 +349,21 @@ func (e *Engine) runApp(r ResultSnapshot, exePath string) {
 
 	if err := cmd.Start(); err != nil {
 		log.Printf("[Worker] Failed to start %s: %v", r.Name, err)
-		if stdoutFile != nil { stdoutFile.Close() }
-		if stderrFile != nil { stderrFile.Close() }
-		e.state.UpdateResult(r.Name, StateError, 0, 0)
+		if stdoutFile != nil {
+			stdoutFile.Close()
+		}
+		if stderrFile != nil {
+			stderrFile.Close()
+		}
+		e.state.UpdateResult(r.Name, StateError, 0, 0, 0)
 		return
 	}
-	if stdoutFile != nil { stdoutFile.Close() }
-	if stderrFile != nil { stderrFile.Close() }
+	if stdoutFile != nil {
+		stdoutFile.Close()
+	}
+	if stderrFile != nil {
+		stderrFile.Close()
+	}
 
 	e.mu.Lock()
 	e.running[r.Name] = cmd
@@ -382,32 +394,40 @@ func (e *Engine) runApp(r ResultSnapshot, exePath string) {
 			wasStopping := e.stopping
 			e.mu.RUnlock()
 
+			if wasStopping {
+				log.Printf("[Worker] Task %s interrupted during shutdown", r.Name)
+				e.writeCheckpoint(r)
+				e.state.UpdateResult(r.Name, StateNew, readProgress(r.Slot), elapsed, 0)
+				return
+			}
+
 			switch exitCode {
 			case ExitOK:
 				progress := readProgress(r.Slot)
 				e.uploadOutputs(r)
-				e.state.UpdateResult(r.Name, StateReady, progress, elapsed)
+				e.state.UpdateResult(r.Name, StateReady, progress, elapsed, exitCode)
 				e.state.UpdateStats(true, elapsed, 0, 0)
 				log.Printf("[Worker] Task %s completed OK (%.1fs, progress=%.2f)", r.Name, elapsed, progress)
 
 			case ExitNeedAbort:
 				log.Printf("[Worker] Task %s requests abort (exit %d)", r.Name, exitCode)
-				e.state.UpdateResult(r.Name, StateError, 0, elapsed)
+				e.state.UpdateResult(r.Name, StateError, 0, elapsed, exitCode)
 				e.state.UpdateStats(false, elapsed, 0, 0)
 
 			case ExitClientExiting:
 				if wasStopping {
 					log.Printf("[Worker] Task %s paused for shutdown (exit %d)", r.Name, exitCode)
 					e.writeCheckpoint(r)
-					e.state.UpdateResult(r.Name, StateNew, readProgress(r.Slot), elapsed)
+					e.state.UpdateResult(r.Name, StateNew, readProgress(r.Slot), elapsed, 0)
 				} else {
-					e.state.UpdateResult(r.Name, StateError, 0, elapsed)
+					log.Printf("[Worker] Task %s requests client exit unexpectedly (exit %d)", r.Name, exitCode)
+					e.state.UpdateResult(r.Name, StateError, 0, elapsed, exitCode)
 					e.state.UpdateStats(false, elapsed, 0, 0)
 				}
 
 			default:
 				log.Printf("[Worker] Task %s failed with exit code %d (%.1fs)", r.Name, exitCode, elapsed)
-				e.state.UpdateResult(r.Name, StateError, 0, elapsed)
+				e.state.UpdateResult(r.Name, StateError, 0, elapsed, exitCode)
 				e.state.UpdateStats(false, elapsed, 0, 0)
 			}
 			return
@@ -416,7 +436,7 @@ func (e *Engine) runApp(r ResultSnapshot, exePath string) {
 			e.writeCheckpoint(r)
 			progress := readProgress(r.Slot)
 			elapsed := time.Since(start).Seconds()
-			e.state.UpdateResult(r.Name, StateCompute, progress, elapsed)
+			e.state.UpdateResult(r.Name, StateCompute, progress, elapsed, 0)
 
 		case <-ticker.C:
 			elapsed := time.Since(start)
@@ -425,8 +445,8 @@ func (e *Engine) runApp(r ResultSnapshot, exePath string) {
 				maxElap = time.Duration(r.MaxElapSec * float64(time.Second))
 			}
 			if elapsed > maxElap {
-				cmd.Process.Kill()
-				e.state.UpdateResult(r.Name, StateError, 0, maxElap.Seconds())
+				terminateProcess(cmd)
+				e.state.UpdateResult(r.Name, StateError, 0, maxElap.Seconds(), ExitExceeded)
 				log.Printf("[Worker] Task %s timed out (%.1fs)", r.Name, maxElap.Seconds())
 				return
 			}
@@ -438,15 +458,18 @@ func (e *Engine) runApp(r ResultSnapshot, exePath string) {
 			if frac > 0.99 {
 				frac = 0.99
 			}
-			e.state.UpdateResult(r.Name, StateCompute, frac, elapsed.Seconds())
+			e.state.UpdateResult(r.Name, StateCompute, frac, elapsed.Seconds(), 0)
 
 		case <-e.stop:
-			cmd.Process.Signal(syscall.SIGTERM)
+			log.Printf("[Worker] Stopping task %s", r.Name)
+			terminateProcess(cmd)
 			select {
 			case <-time.After(30 * time.Second):
 				cmd.Process.Kill()
 			case <-done:
 			}
+			e.writeCheckpoint(r)
+			e.state.UpdateResult(r.Name, StateNew, readProgress(r.Slot), time.Since(start).Seconds(), 0)
 			return
 		}
 	}
@@ -496,19 +519,34 @@ func readProgress(slotDir string) float64 {
 	return v
 }
 
+func terminateProcess(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	if runtime.GOOS == "windows" {
+		exec.Command("taskkill", "/T", "/F", "/PID", fmt.Sprintf("%d", cmd.Process.Pid)).Run()
+		cmd.Process.Kill()
+		return
+	}
+	cmd.Process.Signal(syscall.SIGTERM)
+}
+
 func classifyExit(err error) int {
 	if err == nil {
 		return ExitOK
 	}
 	if exitErr, ok := err.(*exec.ExitError); ok {
-		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-			code := status.ExitStatus()
-			if code >= 64 && code <= 200 {
-				return code
-			}
+		code := exitErr.ExitCode()
+		switch {
+		case code == 0:
+			return ExitOK
+		case code >= 64 && code <= 200:
+			return code
+		default:
+			return ExitComputeError
 		}
 	}
-	return ExitOK
+	return ExitComputeError
 }
 
 func parseCmdLine(s string) []string {
@@ -545,7 +583,7 @@ func (e *Engine) checkRunning(r ResultSnapshot) {
 		exePath := e.findExecutable(r)
 		if exePath == "" {
 			log.Printf("[Worker] Task %s exe missing, marking ready", r.Name)
-			e.state.UpdateResult(r.Name, StateReady, 1.0, r.CPUTime)
+			e.state.UpdateResult(r.Name, StateReady, 1.0, r.CPUTime, 0)
 		}
 	}
 }

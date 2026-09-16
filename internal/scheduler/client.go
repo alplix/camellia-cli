@@ -38,17 +38,17 @@ type Request struct {
 }
 
 type HostInfoXML struct {
-	XMLName  xml.Name `xml:"host_info"`
-	OsName   string   `xml:"os_name"`
-	OsVersion string  `xml:"os_version"`
-	PVendor  string   `xml:"p_vendor"`
-	PModel   string   `xml:"p_model"`
-	PNcpus   int      `xml:"p_ncpus"`
-	PFlops   float64  `xml:"p_fpops"`
-	MNbytes  float64  `xml:"m_nbytes"`
-	DFree    float64  `xml:"d_free"`
-	DTotal   float64  `xml:"d_total"`
-	ConnType int      `xml:"conn_type"`
+	XMLName   xml.Name `xml:"host_info"`
+	OsName    string   `xml:"os_name"`
+	OsVersion string   `xml:"os_version"`
+	PVendor   string   `xml:"p_vendor"`
+	PModel    string   `xml:"p_model"`
+	PNcpus    int      `xml:"p_ncpus"`
+	PFlops    float64  `xml:"p_fpops"`
+	MNbytes   float64  `xml:"m_nbytes"`
+	DFree     float64  `xml:"d_free"`
+	DTotal    float64  `xml:"d_total"`
+	ConnType  int      `xml:"conn_type"`
 }
 
 type ResultXML struct {
@@ -66,17 +66,17 @@ type ResultXML struct {
 }
 
 type Reply struct {
-	XMLName       xml.Name          `xml:"scheduler_reply"`
-	Error         string            `xml:"error"`
-	TotalCredit   float64           `xml:"total_credit"`
-	ExpAvgCredit  float64           `xml:"expavg_credit"`
-	ResourceShare float64           `xml:"resource_share"`
-	Message       string            `xml:"message"`
-	ServerTime    float64           `xml:"server_time"`
-	Delay         int               `xml:"delay"`
-	FileInfos     []FileInfoXML     `xml:"file_info"`
-	FileTransfers []ReplyFileXfer   `xml:"file_transfer"`
-	Results       []ReplyResult     `xml:"result"`
+	XMLName       xml.Name        `xml:"scheduler_reply"`
+	Error         string          `xml:"error"`
+	TotalCredit   float64         `xml:"total_credit"`
+	ExpAvgCredit  float64         `xml:"expavg_credit"`
+	ResourceShare float64         `xml:"resource_share"`
+	Message       string          `xml:"message"`
+	ServerTime    float64         `xml:"server_time"`
+	Delay         int             `xml:"delay"`
+	FileInfos     []FileInfoXML   `xml:"file_info"`
+	FileTransfers []ReplyFileXfer `xml:"file_transfer"`
+	Results       []ReplyResult   `xml:"result"`
 }
 
 type ReplyFileXfer struct {
@@ -95,20 +95,20 @@ type FileInfoXML struct {
 }
 
 type ReplyResult struct {
-	XMLName          xml.Name    `xml:"result"`
-	Name             string      `xml:"name"`
-	WuName           string      `xml:"wu_name"`
-	FractionDone     float64     `xml:"fraction_done"`
-	Priority         float64     `xml:"priority"`
-	ReportDeadline   float64     `xml:"report_deadline"`
-	EstimatedFlops   float64     `xml:"estimated_fpops"`
-	MaxElapSec       float64     `xml:"max_elap_sec"`
-	AppVersionNum    int         `xml:"app_version_num"`
-	EarliestDeadline float64     `xml:"earliest_deadline"`
-	StdOut           string      `xml:"stdout_out"`
-	CmdLine          string      `xml:"cmd_line"`
-	RsEnd            string      `xml:"rs_end"`
-	PlanClass        string      `xml:"plan_class"`
+	XMLName          xml.Name     `xml:"result"`
+	Name             string       `xml:"name"`
+	WuName           string       `xml:"wu_name"`
+	FractionDone     float64      `xml:"fraction_done"`
+	Priority         float64      `xml:"priority"`
+	ReportDeadline   float64      `xml:"report_deadline"`
+	EstimatedFlops   float64      `xml:"estimated_fpops"`
+	MaxElapSec       float64      `xml:"max_elap_sec"`
+	AppVersionNum    int          `xml:"app_version_num"`
+	EarliestDeadline float64      `xml:"earliest_deadline"`
+	StdOut           string       `xml:"stdout_out"`
+	CmdLine          string       `xml:"cmd_line"`
+	RsEnd            string       `xml:"rs_end"`
+	PlanClass        string       `xml:"plan_class"`
 	FileRef          []FileRefXML `xml:"file_ref"`
 }
 
@@ -134,18 +134,30 @@ func (c *Client) SetAuth(authToken string) {
 	c.authToken = authToken
 }
 
+func (c *Client) baseURL() string {
+	s := strings.TrimRight(c.projectURL, "/")
+	scheme := "https://"
+	if strings.HasPrefix(s, "http://") {
+		scheme = "http://"
+		s = strings.TrimPrefix(s, "http://")
+	} else {
+		s = strings.TrimPrefix(s, "https://")
+	}
+	parts := strings.SplitN(s, "/", 2)
+	host := parts[0]
+	path := ""
+	if len(parts) > 1 {
+		path = "/" + parts[1]
+	}
+	return scheme + host + path
+}
+
 func (c *Client) GetSchedulerURL() string {
-	s := strings.TrimPrefix(c.projectURL, "https://")
-	s = strings.TrimPrefix(s, "http://")
-	host := strings.Split(s, "/")[0]
-	return fmt.Sprintf("https://%s/cgi-bin/scheduler", host)
+	return c.baseURL() + "/cgi-bin/scheduler"
 }
 
 func (c *Client) GetFileURL(filename string) string {
-	s := strings.TrimPrefix(c.projectURL, "https://")
-	s = strings.TrimPrefix(s, "http://")
-	host := strings.Split(s, "/")[0]
-	return fmt.Sprintf("https://%s/file.php?name=%s", host, filename)
+	return c.baseURL() + "/file.php?name=" + filename
 }
 
 func (c *Client) SendRequest(req *Request) (*Reply, error) {
@@ -260,8 +272,5 @@ func (c *Client) UploadFile(filePath, projectName string) error {
 }
 
 func (c *Client) GetUploadURL() string {
-	s := strings.TrimPrefix(c.projectURL, "https://")
-	s = strings.TrimPrefix(s, "http://")
-	host := strings.Split(s, "/")[0]
-	return fmt.Sprintf("https://%s/cgi-bin/file_upload_handler", host)
+	return c.baseURL() + "/cgi-bin/file_upload_handler"
 }

@@ -44,6 +44,7 @@ type Server struct {
 	password string
 	mu       sync.Mutex
 	clients  map[net.Conn]bool
+	onQuit   func()
 }
 
 func NewServer(handler Handler, password string) *Server {
@@ -52,6 +53,12 @@ func NewServer(handler Handler, password string) *Server {
 		password: password,
 		clients:  make(map[net.Conn]bool),
 	}
+}
+
+func (s *Server) SetOnQuit(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onQuit = fn
 }
 
 func (s *Server) Start(addr string) error {
@@ -236,15 +243,30 @@ func (s *Server) dispatch(request string) string {
 	if strings.HasPrefix(req, "<get_host_info") {
 		return s.wrapCall(s.handler.GetHostInfo())
 	}
+	if strings.HasPrefix(req, "<quit") {
+		var fn func()
+		s.mu.Lock()
+		fn = s.onQuit
+		s.mu.Unlock()
+		if fn != nil {
+			go fn()
+		}
+		return cxml.WrapSuccess()
+	}
 
 	return cxml.WrapError("unknown command")
 }
 
-var nonces = map[string]time.Time{}
+var (
+	nonceMu sync.Mutex
+	nonces  = map[string]time.Time{}
+)
 
 func (s *Server) handleAuth1() string {
 	nonce := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%d", time.Now().UnixNano()))))
+	nonceMu.Lock()
 	nonces[nonce] = time.Now()
+	nonceMu.Unlock()
 	return cxml.WrapReply(fmt.Sprintf("<nonce>%s</nonce>", nonce))
 }
 
@@ -253,6 +275,8 @@ func (s *Server) handleAuth2(req string) string {
 	if m == nil {
 		return cxml.WrapError("no nonce hash")
 	}
+	nonceMu.Lock()
+	defer nonceMu.Unlock()
 	for nonce, t := range nonces {
 		if time.Since(t) > 5*time.Minute {
 			delete(nonces, nonce)

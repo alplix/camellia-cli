@@ -39,8 +39,8 @@ type ProjectState struct {
 }
 
 type ProjectConfig struct {
-	MinRPCTime    float64
-	IdleDelDays   float64
+	MinRPCTime  float64
+	IdleDelDays float64
 }
 
 type StateManager interface {
@@ -84,32 +84,32 @@ type GPUSnapshot struct {
 }
 
 type ProjectInfo struct {
-	Name               string
-	URL                string
-	Authenticator      string
-	TotalCredit        float64
-	ExpAvgCredit       float64
-	ResourceShare      float64
-	HostID             int
-	SuspendedViaGUI    int
+	Name                string
+	URL                 string
+	Authenticator       string
+	TotalCredit         float64
+	ExpAvgCredit        float64
+	ResourceShare       float64
+	HostID              int
+	SuspendedViaGUI     int
 	DontRequestMoreWork int
 }
 
 type ResultInfo struct {
-	Name           string
-	WuName         string
-	ProjectURL     string
-	State          int
-	FracDone       float64
-	CPUTime        float64
-	Slot           string
-	GPU            bool
-	Deadline       float64
-	ExitStatus     int
-	CmdLine        string
-	AppVersionNum  int
-	Files          []FileInfo
-	ReadyToReport  int
+	Name          string
+	WuName        string
+	ProjectURL    string
+	State         int
+	FracDone      float64
+	CPUTime       float64
+	Slot          string
+	GPU           bool
+	Deadline      float64
+	ExitStatus    int
+	CmdLine       string
+	AppVersionNum int
+	Files         []FileInfo
+	ReadyToReport int
 }
 
 type FileInfo struct {
@@ -278,7 +278,6 @@ func (e *Engine) doRPC(ps *ProjectState) {
 		e.state.AddMessage(reply.Message, ps.URL, 1)
 	}
 
-	reported := make(map[string]bool)
 	fileMap := make(map[string]FileInfoXML)
 	for _, fi := range reply.FileInfos {
 		fileMap[fi.Name] = fi
@@ -288,17 +287,27 @@ func (e *Engine) doRPC(ps *ProjectState) {
 		e.handleWork(ps, rr, fileMap)
 	}
 
+	echoed := make(map[string]bool)
+	for _, rr := range reply.Results {
+		echoed[rr.Name] = true
+	}
+	reported := make(map[string]bool)
 	for _, r := range e.state.GetResults() {
 		if r.ProjectURL == ps.URL && (r.State == 4 || r.State == 5) && r.ReadyToReport == 1 {
 			reported[r.Name] = true
 		}
 	}
+	removed := 0
 	for name := range reported {
+		if echoed[name] {
+			continue
+		}
 		e.state.RemoveResult(name)
+		removed++
 	}
 
-	log.Printf("[Scheduler] RPC done for %s, credit=%.1f, got %d tasks, reported %d",
-		ps.URL, reply.TotalCredit, len(reply.Results), len(reported))
+	log.Printf("[Scheduler] RPC done for %s, credit=%.1f, got %d tasks, reported %d, removed %d",
+		ps.URL, reply.TotalCredit, len(reply.Results), len(reported), removed)
 }
 
 func (e *Engine) handleWork(ps *ProjectState, rr ReplyResult, fileMap map[string]FileInfoXML) {

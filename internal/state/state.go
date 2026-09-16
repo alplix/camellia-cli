@@ -10,20 +10,19 @@ import (
 )
 
 type State struct {
-	XMLName   xml.Name  `xml:"client_state"`
-	Version   string    `xml:"client_version"`
-	HostInfo  HostInfo  `xml:"host_info"`
-	Projects  []Project `xml:"projects>project"`
-	Results   []Result  `xml:"results>result"`
-	Transfers []Xfer    `xml:"file_transfers>file_transfer"`
-	Messages  []Msg     `xml:"msgs>msg"`
-	Status    Status    `xml:"cc_status"`
+	XMLName   xml.Name   `xml:"client_state"`
+	Version   string     `xml:"client_version"`
+	HostInfo  HostInfo   `xml:"host_info"`
+	Projects  []Project  `xml:"projects>project"`
+	Results   []Result   `xml:"results>result"`
+	Transfers []Xfer     `xml:"file_transfers>file_transfer"`
+	Messages  []Msg      `xml:"msgs>msg"`
+	Status    Status     `xml:"cc_status"`
 	Stats     []DayStats `xml:"statistics>day"`
 
-	mu             sync.RWMutex
-	stateFP        string
-	seqno          int
-_TRANSFERTRACK  map[string]*TransferProgress
+	mu      sync.RWMutex
+	stateFP string
+	seqno   int
 }
 
 type HostInfo struct {
@@ -43,49 +42,49 @@ type HostInfo struct {
 }
 
 type Project struct {
-	Name               string  `xml:"name"`
-	MasterURL          string  `xml:"master_url"`
-	ProjectDir         string  `xml:"project_dir"`
-	Venue              string  `xml:"venue"`
-	UserName           string  `xml:"user_name"`
-	TeamName           string  `xml:"team_name"`
-	UserTotalCredit    float64 `xml:"user_total_credit"`
-	UserExpavgCredit   float64 `xml:"user_expavg_credit"`
-	HostTotalCredit    float64 `xml:"host_total_credit"`
-	HostExpavgCredit   float64 `xml:"host_expavg_credit"`
-	ResourceShare      float64 `xml:"resource_share"`
-	SuspendedViaGUI    int     `xml:"suspended_via_gui"`
-	DontRequestMoreWork int    `xml:"dont_request_more_work"`
-	SchedRPCPending    int     `xml:"sched_rpc_pending"`
-	Ended              int     `xml:"ended"`
-	LastRPCTime        float64 `xml:"last_rpc_time"`
-	Authenticator      string  `xml:"authenticator"`
+	Name                string  `xml:"name"`
+	MasterURL           string  `xml:"master_url"`
+	ProjectDir          string  `xml:"project_dir"`
+	Venue               string  `xml:"venue"`
+	UserName            string  `xml:"user_name"`
+	TeamName            string  `xml:"team_name"`
+	UserTotalCredit     float64 `xml:"user_total_credit"`
+	UserExpavgCredit    float64 `xml:"user_expavg_credit"`
+	HostTotalCredit     float64 `xml:"host_total_credit"`
+	HostExpavgCredit    float64 `xml:"host_expavg_credit"`
+	ResourceShare       float64 `xml:"resource_share"`
+	SuspendedViaGUI     int     `xml:"suspended_via_gui"`
+	DontRequestMoreWork int     `xml:"dont_request_more_work"`
+	SchedRPCPending     int     `xml:"sched_rpc_pending"`
+	Ended               int     `xml:"ended"`
+	LastRPCTime         float64 `xml:"last_rpc_time"`
+	Authenticator       string  `xml:"authenticator"`
 }
 
 type Result struct {
-	Name            string  `xml:"name"`
-	WuName          string  `xml:"wu_name"`
-	ProjectURL      string  `xml:"project_url"`
-	State           int     `xml:"state"`
-	ExitStatus      int     `xml:"exit_status"`
-	FractionDone    float64 `xml:"fraction_done"`
-	ElapsedTime     float64 `xml:"elapsed_time"`
-	CurrentCPUTime  float64 `xml:"current_cpu_time"`
-	EstimatedCPUTimeRemaining float64 `xml:"estimated_cpu_time_remaining"`
-	ReportDeadline  float64 `xml:"report_deadline"`
-	WorkingSetSize  float64 `xml:"working_set_size"`
-	Resources       string  `xml:"resources"`
-	ActiveTask      int     `xml:"active_task"`
-	SuspendedViaGUI int     `xml:"suspended_via_gui"`
-	ReadyToReport   int     `xml:"ready_to_report"`
-	Slot            int     `xml:"slot"`
-	SlotPath        string  `xml:"slot_path"`
-	VersionNum      int     `xml:"version_num"`
-	CmdLine         string  `xml:"cmd_line"`
-	AppVersionNum   int     `xml:"app_version_num"`
-	Files           []FileInfo `xml:"file_info"`
-	StdOut          string  `xml:"stdout"`
-	StdErr          string  `xml:"stderr"`
+	Name                      string     `xml:"name"`
+	WuName                    string     `xml:"wu_name"`
+	ProjectURL                string     `xml:"project_url"`
+	State                     int        `xml:"state"`
+	ExitStatus                int        `xml:"exit_status"`
+	FractionDone              float64    `xml:"fraction_done"`
+	ElapsedTime               float64    `xml:"elapsed_time"`
+	CurrentCPUTime            float64    `xml:"current_cpu_time"`
+	EstimatedCPUTimeRemaining float64    `xml:"estimated_cpu_time_remaining"`
+	ReportDeadline            float64    `xml:"report_deadline"`
+	WorkingSetSize            float64    `xml:"working_set_size"`
+	Resources                 string     `xml:"resources"`
+	ActiveTask                int        `xml:"active_task"`
+	SuspendedViaGUI           int        `xml:"suspended_via_gui"`
+	ReadyToReport             int        `xml:"ready_to_report"`
+	Slot                      int        `xml:"slot"`
+	SlotPath                  string     `xml:"slot_path"`
+	VersionNum                int        `xml:"version_num"`
+	CmdLine                   string     `xml:"cmd_line"`
+	AppVersionNum             int        `xml:"app_version_num"`
+	Files                     []FileInfo `xml:"file_info"`
+	StdOut                    string     `xml:"stdout"`
+	StdErr                    string     `xml:"stderr"`
 }
 
 type FileInfo struct {
@@ -124,29 +123,20 @@ type Msg struct {
 }
 
 type Status struct {
-	TaskMode    int `xml:"task_mode"`
-	NetworkMode int `xml:"network_mode"`
+	TaskMode    int   `xml:"task_mode"`
+	NetworkMode int   `xml:"network_mode"`
 	DiskUsage   int64 `xml:"disk_usage"`
 	DiskQuota   int64 `xml:"disk_quota"`
 }
 
 type DayStats struct {
-	Date           string  `xml:"date"`
-	Tasks          int     `xml:"tasks"`
-	TasksSuccess   int     `xml:"tasks_success"`
-	TasksError     int     `xml:"tasks_error"`
-	TotalCPU       float64 `xml:"total_cpu"`
-	TotalGPU       float64 `xml:"total_gpu"`
-	CreditEarned   float64 `xml:"credit_earned"`
-}
-
-type TransferProgress struct {
-	Name        string
-	ProjectURL  string
-	IsUpload    bool
-	TotalBytes  float64
-	BytesDone   float64
-	StartTime   time.Time
+	Date         string  `xml:"date"`
+	Tasks        int     `xml:"tasks"`
+	TasksSuccess int     `xml:"tasks_success"`
+	TasksError   int     `xml:"tasks_error"`
+	TotalCPU     float64 `xml:"total_cpu"`
+	TotalGPU     float64 `xml:"total_gpu"`
+	CreditEarned float64 `xml:"credit_earned"`
 }
 
 func New(dataDir string) *State {
@@ -406,11 +396,11 @@ func (s *State) Snapshot() *State {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	cp := &State{
-		Version:   s.Version,
-		HostInfo:  s.HostInfo,
-		Status:    s.Status,
-		stateFP:   s.stateFP,
-		seqno:     s.seqno,
+		Version:  s.Version,
+		HostInfo: s.HostInfo,
+		Status:   s.Status,
+		stateFP:  s.stateFP,
+		seqno:    s.seqno,
 	}
 	cp.Projects = make([]Project, len(s.Projects))
 	copy(cp.Projects, s.Projects)
@@ -420,5 +410,7 @@ func (s *State) Snapshot() *State {
 	copy(cp.Transfers, s.Transfers)
 	cp.Messages = make([]Msg, len(s.Messages))
 	copy(cp.Messages, s.Messages)
+	cp.Stats = make([]DayStats, len(s.Stats))
+	copy(cp.Stats, s.Stats)
 	return cp
 }

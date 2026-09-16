@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,18 @@ import (
 )
 
 const version = "1.0.0"
+
+const defaultGUIRPCPort = 31418
+
+func guiRPCPort() int {
+	if v := os.Getenv("CAMELLIA_GUI_RPC_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 && p < 65536 {
+			return p
+		}
+		fmt.Fprintf(os.Stderr, "Warning: invalid CAMELLIA_GUI_RPC_PORT, using %d\n", defaultGUIRPCPort)
+	}
+	return defaultGUIRPCPort
+}
 
 func main() {
 	if len(os.Args) > 1 {
@@ -118,7 +131,7 @@ func runDaemon() {
 	fmt.Printf("Projects: %d | Tasks: %d\n", len(st.Projects), len(st.Results))
 	os.Stdout.Sync()
 
-	guiRPCAddr := "0.0.0.0:31416"
+	guiRPCAddr := fmt.Sprintf("0.0.0.0:%d", guiRPCPort())
 	if !cfg.Options.AllowRemoteGuiRPC {
 		guiRPCAddr = "127.0.0.1:31416"
 	}
@@ -129,6 +142,10 @@ func runDaemon() {
 	if err := srv.Start(guiRPCAddr); err != nil {
 		fatal("GUI RPC server failed: %v", err)
 	}
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	srv.SetOnQuit(func() { sig <- syscall.SIGTERM })
 
 	fmt.Printf("GUI RPC listening on %s\n", guiRPCAddr)
 	fmt.Println("Ready.")
@@ -151,8 +168,6 @@ func runDaemon() {
 
 	st.AddMessage("Client started", "", 1)
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 
 	fmt.Println("\nShutting down...")
@@ -168,17 +183,17 @@ func runDaemon() {
 func detectHostInfo() state.HostInfo {
 	specs := detect.Detect()
 	hi := state.HostInfo{
-		OSName:   specs.OSName,
+		OSName:    specs.OSName,
 		OSVersion: specs.OSVersion,
-		PVendor:  specs.Vendor,
-		PModel:   specs.Model,
-		PNcpus:   float64(specs.Ncpus),
-		PFlops:   specs.PFlops,
-		MNbytes:  specs.MNbytes,
-		DFree:    specs.DFree,
-		DTotal:   specs.DTotal,
-		HostCPID: specs.HostCPID,
-		CamVer:   version,
+		PVendor:   specs.Vendor,
+		PModel:    specs.Model,
+		PNcpus:    float64(specs.Ncpus),
+		PFlops:    specs.PFlops,
+		MNbytes:   specs.MNbytes,
+		DFree:     specs.DFree,
+		DTotal:    specs.DTotal,
+		HostCPID:  specs.HostCPID,
+		CamVer:    version,
 	}
 	for _, g := range specs.GPUs {
 		hi.GPUs = append(hi.GPUs, g.Name)
@@ -201,7 +216,7 @@ func loadOrCreatePassword(dataDir string) string {
 }
 
 func stopDaemon() {
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:31416", 3*time.Second)
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", guiRPCPort()), 3*time.Second)
 	if err != nil {
 		fmt.Println("Camellia client is not running.")
 		return
@@ -216,6 +231,10 @@ func showStatus() {
 	dataDir := config.DataDir()
 	fp := filepath.Join(dataDir, "client_state.xml")
 	if _, err := os.Stat(fp); os.IsNotExist(err) {
+		if isDaemonRunning() {
+			fmt.Println("Camellia client is running.")
+			return
+		}
 		fmt.Println("Camellia client is not running.")
 		return
 	}
@@ -224,12 +243,21 @@ func showStatus() {
 		fmt.Println("Cannot read client state.")
 		return
 	}
-	fmt.Printf("Camellia CLI v%s\n", st.Version)
+	fmt.Printf("Camellia CLI v%s\n", strings.TrimPrefix(st.Version, "Camellia/"))
 	fmt.Printf("Projects: %d\n", len(st.Projects))
 	fmt.Printf("Tasks: %d\n", len(st.Results))
 	for _, p := range st.Projects {
 		fmt.Printf("  - %s (%s)\n", p.Name, p.MasterURL)
 	}
+}
+
+func isDaemonRunning() bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", guiRPCPort()), time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func fatal(format string, args ...any) {
@@ -258,7 +286,7 @@ func (h *clientHandler) GetCcStatus() ([]byte, error) {
 
 func (h *clientHandler) GetMessages(after int) ([]byte, error) {
 	type msgXML struct {
-		XMLName xml.Name  `xml:"msgs"`
+		XMLName xml.Name    `xml:"msgs"`
 		M       []state.Msg `xml:"msg"`
 	}
 	return xml.MarshalIndent(msgXML{M: h.state.GetMessages(after)}, "", "  ")
@@ -465,6 +493,10 @@ func (a *stateAdapter) AddResult(r scheduler.ResultInfo) {
 	for _, f := range r.Files {
 		files = append(files, state.FileInfo{Name: f.Name, URL: f.URL, NBytes: f.NBytes, MD5: f.MD5})
 	}
+	resources := ""
+	if r.GPU {
+		resources = "gpu"
+	}
 	a.s.AddResult(state.Result{
 		Name:          r.Name,
 		WuName:        r.WuName,
@@ -472,6 +504,7 @@ func (a *stateAdapter) AddResult(r scheduler.ResultInfo) {
 		State:         r.State,
 		CmdLine:       r.CmdLine,
 		AppVersionNum: r.AppVersionNum,
+		Resources:     resources,
 		Files:         files,
 	})
 }
@@ -505,10 +538,12 @@ func (a *stateAdapter) GetHostInfo() scheduler.HostInfoSnapshot {
 	}
 }
 
-func (a *stateAdapter) GetNetworkMode() int    { return a.s.GetNetworkMode() }
-func (a *stateAdapter) GetDiskUsage() int64     { return a.s.GetDiskUsage() }
-func (a *stateAdapter) SetDiskUsage(v int64)    { a.s.SetDiskUsage(v) }
-func (a *stateAdapter) UpdateStats(ok bool, cpu, gpu, credit float64) { a.s.UpdateStats(ok, cpu, gpu, credit) }
+func (a *stateAdapter) GetNetworkMode() int  { return a.s.GetNetworkMode() }
+func (a *stateAdapter) GetDiskUsage() int64  { return a.s.GetDiskUsage() }
+func (a *stateAdapter) SetDiskUsage(v int64) { a.s.SetDiskUsage(v) }
+func (a *stateAdapter) UpdateStats(ok bool, cpu, gpu, credit float64) {
+	a.s.UpdateStats(ok, cpu, gpu, credit)
+}
 func (a *stateAdapter) AddMessage(body, project string, pri int) { a.s.AddMessage(body, project, pri) }
 func (a *stateAdapter) Save()                                    { a.s.Save() }
 
@@ -541,7 +576,7 @@ func convertFiles(files []state.FileInfo) []worker.FileRef {
 	return out
 }
 
-func (a *stateWorkerAdapter) UpdateResult(name string, state int, fracDone float64, cpuTime float64) {
+func (a *stateWorkerAdapter) UpdateResult(name string, state int, fracDone float64, cpuTime float64, exitStatus int) {
 	a.s.Lock()
 	defer a.s.Unlock()
 	for i := range a.s.Results {
@@ -549,7 +584,8 @@ func (a *stateWorkerAdapter) UpdateResult(name string, state int, fracDone float
 			a.s.Results[i].State = state
 			a.s.Results[i].FractionDone = fracDone
 			a.s.Results[i].CurrentCPUTime = cpuTime
-			if state == worker.StateReady {
+			a.s.Results[i].ExitStatus = exitStatus
+			if state == worker.StateReady || state == worker.StateError {
 				a.s.Results[i].ReadyToReport = 1
 			}
 			return
@@ -569,11 +605,13 @@ func (a *stateWorkerAdapter) SetSlotPath(name, slotPath string) {
 }
 
 func (a *stateWorkerAdapter) RemoveResult(name string) { a.s.RemoveResult(name) }
-func (a *stateWorkerAdapter) GetTaskMode() int          { return a.s.GetTaskMode() }
-func (a *stateWorkerAdapter) GetDiskUsage() int64       { return a.s.GetDiskUsage() }
-func (a *stateWorkerAdapter) GetDiskQuota() int64       { return a.s.GetDiskQuota() }
-func (a *stateWorkerAdapter) SetDiskUsage(v int64)      { a.s.SetDiskUsage(v) }
-func (a *stateWorkerAdapter) UpdateStats(ok bool, cpu, gpu, credit float64) { a.s.UpdateStats(ok, cpu, gpu, credit) }
+func (a *stateWorkerAdapter) GetTaskMode() int         { return a.s.GetTaskMode() }
+func (a *stateWorkerAdapter) GetDiskUsage() int64      { return a.s.GetDiskUsage() }
+func (a *stateWorkerAdapter) GetDiskQuota() int64      { return a.s.GetDiskQuota() }
+func (a *stateWorkerAdapter) SetDiskUsage(v int64)     { a.s.SetDiskUsage(v) }
+func (a *stateWorkerAdapter) UpdateStats(ok bool, cpu, gpu, credit float64) {
+	a.s.UpdateStats(ok, cpu, gpu, credit)
+}
 func (a *stateWorkerAdapter) AddMessage(body, project string, pri int) {
 	a.s.AddMessage(body, project, pri)
 }

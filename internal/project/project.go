@@ -10,18 +10,18 @@ import (
 )
 
 type Account struct {
-	XMLName        xml.Name `xml:"account"`
-	ProjectURL     string   `xml:"project_url"`
-	UserName       string   `xml:"user_name"`
-	Authenticator  string   `xml:"authenticator"`
-	TeamID         int      `xml:"team_id"`
-	UserID         int      `xml:"user_id"`
-	HostID         int      `xml:"host_id"`
-	TotalCredit    float64  `xml:"total_credit"`
-	ExpAvgCredit   float64  `xml:"expavg_credit"`
-	ResourceShare  float64  `xml:"resource_share"`
-	Joined         int      `xml:"joined"`
-	Venue          string   `xml:"venue"`
+	XMLName       xml.Name `xml:"account"`
+	ProjectURL    string   `xml:"project_url"`
+	UserName      string   `xml:"user_name"`
+	Authenticator string   `xml:"authenticator"`
+	TeamID        int      `xml:"team_id"`
+	UserID        int      `xml:"user_id"`
+	HostID        int      `xml:"host_id"`
+	TotalCredit   float64  `xml:"total_credit"`
+	ExpAvgCredit  float64  `xml:"expavg_credit"`
+	ResourceShare float64  `xml:"resource_share"`
+	Joined        int      `xml:"joined"`
+	Venue         string   `xml:"venue"`
 }
 
 type ProjectDir struct {
